@@ -1,21 +1,25 @@
-# gpt-image-2 Image Generation Skill
+# gpt-image-2 Image Generation & Editing Skill
 
 *Read this in other languages: [日本語](./README.ja-JP.md)*
 
-A [Claude Code](https://claude.com/claude-code) **Agent Skill** that generates images from text prompts using the Azure AI Foundry (Microsoft Foundry) `gpt-image-2` model and saves them locally.
+A [Claude Code](https://claude.com/claude-code) **Agent Skill** that generates **and edits** images using the Azure AI Foundry (Microsoft Foundry) `gpt-image-2` model and saves them locally. It supports text-to-image generation (`images/generations`) as well as image editing (`images/edits`): single-image edits, multi-image merge (object replacement), and mask-based inpainting.
 
 The skill follows two core principles:
 
-1. **Claude never hand-writes the API call.** All generation logic (request building, validation, saving) lives in a self-contained Python script. Claude only invokes the script as documented in `SKILL.md`.
-2. **Parameters are passed as validated CLI arguments with sensible defaults.** Only `--prompt` is required; everything else falls back to a default that you can customize through a `.env` file.
+1. **Claude never hand-writes the API call.** All generation/editing logic (request building, validation, saving) lives in self-contained Python scripts. Claude only invokes them as documented in `SKILL.md`.
+2. **Parameters are passed as validated CLI arguments with sensible defaults.** For generation only `--prompt` is required; for editing `--prompt` and at least one `--image` are required. Everything else falls back to a default that you can customize through a `.env` file.
 
 ---
 
 ## Features
 
 - Text-to-image generation via Azure OpenAI `images/generations`
+- **Image editing via Azure OpenAI `images/edits`:**
+  - **Single-image edit** — modify an existing image with a prompt
+  - **Multi-image merge** — pass several images to composite them (replace an object in the base image with an object from another image)
+  - **Mask-based inpainting** — limit edits to the transparent region of a PNG mask
 - Full parameter control: `size`, `quality`, `output_format`, `background`, `output_compression`, `n`, `user`
-- Pre-flight validation (size constraints & parameter dependencies) before any API call
+- Pre-flight validation (size constraints, parameter dependencies, and — for editing — input image count/existence/type/extension and PNG mask) before any API call
 - Keyless **Microsoft Entra ID** authentication (preferred) with **API key** fallback
 - `.env` support for credentials **and** default parameters
 - Automatic, unique, title-based filenames saved to `./images` by default
@@ -205,6 +209,50 @@ python scripts/generate_image.py --prompt "cat character concepts" --n 4 --outpu
 
 ---
 
+## Image editing
+
+Edit existing images with a prompt using `scripts/edit_image.py` (the `images/edits` endpoint). It shares the same authentication, `.env` handling, validation, and saving logic as generation. `--prompt` and at least one `--image` are required.
+
+There are two modes:
+
+1. **Single-image edit** — pass one `--image` and describe the change in the prompt (recolor, add/remove objects, restyle, replace background).
+2. **Multi-image merge (object replacement)** — pass multiple `--image` arguments. The **first image is the base**; the rest are reference material. You can replace an object in the base image with an object from another image. Add a `--mask` (a transparent PNG the same size as the base) to limit the edit to the masked (transparent) region only (inpainting).
+
+```bash
+# Single-image edit (replace the background)
+python scripts/edit_image.py --prompt "change the sky to a sunset" --image ./images/landscape.png
+
+# Mask-based inpainting (edit only the transparent region of the mask)
+python scripts/edit_image.py --prompt "replace the hat with a red beret" --image ./photo.png --mask ./hat_mask.png
+
+# Multi-image merge: replace an object in the base with an object from the second image
+python scripts/edit_image.py \
+  --prompt "replace the bag the person is holding with the red backpack from the second image" \
+  --image ./base.png \
+  --image ./red_backpack.png \
+  --mask ./bag_region.png
+```
+
+On success, the absolute path of each saved file is printed to stdout, using the same naming rules as generation.
+
+### Editing parameters
+
+| Argument | Env override | Values | Default | Notes |
+|----------|--------------|--------|---------|-------|
+| `--prompt` | (none) | any text | **required** | Editing instruction |
+| `--image` | (none) | image path (repeatable) | **required (≥1)** | Input image(s); multiple = merge. First is the base. `png`/`jpg`/`jpeg`/`webp`, up to 16 |
+| `--mask` | (none) | transparent PNG path | (optional) | Edit region (transparent area only). Must be PNG |
+| `--size` | `GPT_IMAGE_EDIT_SIZE` | `WxH` or `auto` | `auto` | `auto` matches the input image; `WxH` uses the same constraints as generation |
+| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high` | `high` | |
+| `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | |
+| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent` | `auto` | `transparent` requires `--format png` |
+| `--compression` | `GPT_IMAGE_COMPRESSION` | `0`–`100` | `100` | JPEG only |
+| `--n` | `GPT_IMAGE_N` | `1`–`10` | `1` | Number of images |
+| `--user` | `GPT_IMAGE_USER` | any string | (optional) | Usage-tracking ID |
+| `--output` | `GPT_IMAGE_OUTPUT_DIR` | directory path | `./images` | Created if missing |
+
+---
+
 ## Authentication
 
 1. **Microsoft Entra ID (keyless, preferred).** Uses `DefaultAzureCredential`. Run `az login` locally, or rely on a Managed Identity in the cloud. No long-lived key is stored.
@@ -221,7 +269,7 @@ cd .claude/skills/gpt-image-2
 python -m pytest -q
 ```
 
-The test suite covers validation, authentication resolution, storage/naming, the API client (with mocked HTTP), `.env` loading, parameter-default precedence, and CLI orchestration.
+The test suite covers validation, authentication resolution, storage/naming, the API client (with mocked HTTP) for both generation and editing, multi-image merge / mask handling, edit input validation, `.env` loading, parameter-default precedence, and CLI orchestration for both `generate_image.py` and `edit_image.py`.
 
 This project was built with a Kiro-style spec-driven workflow; the specification lives under `.kiro/specs/gpt-image-2-skill/`.
 

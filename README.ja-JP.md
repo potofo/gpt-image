@@ -1,21 +1,25 @@
-# gpt-image-2 画像生成スキル
+# gpt-image-2 画像生成・編集スキル
 
 *他の言語で読む: [English](./README.md)*
 
-Azure AI Foundry（Microsoft Foundry）の `gpt-image-2` モデルを使い、テキストプロンプトから画像を生成してローカルに保存する [Claude Code](https://claude.com/claude-code) **Agent Skill** です。
+Azure AI Foundry（Microsoft Foundry）の `gpt-image-2` モデルを使い、画像を**生成・編集**してローカルに保存する [Claude Code](https://claude.com/claude-code) **Agent Skill** です。テキストからの画像生成（`images/generations`）に加え、画像編集（`images/edits`）として、単一画像のプロンプト編集・複数画像のマージ（オブジェクト置換）・マスクによるインペインティングに対応します。
 
 このスキルは次の2つの方針に従います。
 
-1. **Claude に API を手書きさせない。** 生成ロジック（リクエスト組み立て・検証・保存）はすべて自己完結した Python スクリプトに閉じ込め、Claude は `SKILL.md` の手順どおりにスクリプトを呼び出すだけです。
-2. **パラメータは検証付きの CLI 引数 + 妥当なデフォルトで渡す。** 必須は `--prompt` のみ。その他はデフォルトにフォールバックし、そのデフォルトは `.env` で自由にカスタマイズできます。
+1. **Claude に API を手書きさせない。** 生成・編集ロジック（リクエスト組み立て・検証・保存）はすべて自己完結した Python スクリプトに閉じ込め、Claude は `SKILL.md` の手順どおりにスクリプトを呼び出すだけです。
+2. **パラメータは検証付きの CLI 引数 + 妥当なデフォルトで渡す。** 生成は `--prompt` のみ、編集は `--prompt` と最低 1 個の `--image` が必須。その他はデフォルトにフォールバックし、そのデフォルトは `.env` で自由にカスタマイズできます。
 
 ---
 
 ## 特長
 
 - Azure OpenAI `images/generations` によるテキスト→画像生成
+- **Azure OpenAI `images/edits` による画像編集:**
+  - **単一画像の編集** — 既存画像をプロンプトで修正
+  - **複数画像のマージ** — 複数画像を渡して合成（ベース画像の一部オブジェクトを別画像のオブジェクトに置換）
+  - **マスクによるインペインティング** — 透過 PNG マスクの透過領域のみを編集
 - 全パラメータ制御: `size` / `quality` / `output_format` / `background` / `output_compression` / `n` / `user`
-- API 呼び出し前の事前検証（size 制約・パラメータ依存関係）
+- API 呼び出し前の事前検証（size 制約・パラメータ依存関係、編集時は入力画像の枚数/存在/種別/拡張子・PNG マスク）
 - キーレスの **Microsoft Entra ID** 認証（優先）と **API キー** フォールバック
 - 認証情報**および**デフォルトパラメータの `.env` 対応
 - 既定で `./images` に、プロンプト由来の一意なタイトルでファイル保存
@@ -205,6 +209,50 @@ python scripts/generate_image.py --prompt "猫のキャラクター案" --n 4 --
 
 ---
 
+## 画像編集
+
+既存画像をプロンプトで編集するには `scripts/edit_image.py`（`images/edits` エンドポイント）を使います。認証・`.env`・検証・保存のロジックは生成と共通です。`--prompt` と最低 1 個の `--image` が必須です。
+
+2つのモードがあります。
+
+1. **単一画像の編集** — `--image` を1枚渡し、プロンプトで修正内容を指示します（色変更・オブジェクトの追加/削除・スタイル変更・背景差し替えなど）。
+2. **複数画像のマージ（オブジェクト置換）** — `--image` を複数渡します。**先頭がベース画像**、2枚目以降が参照素材です。ベース画像の一部オブジェクトを別画像のオブジェクトに置き換えられます。`--mask`（ベースと同サイズの透過 PNG）を渡すと、透過領域のみを編集対象にできます（インペインティング）。
+
+```bash
+# 単一画像の編集（背景を差し替え）
+python scripts/edit_image.py --prompt "空を夕焼けに変える" --image ./images/landscape.png
+
+# マスクで領域を限定して編集（マスクの透過領域のみ編集）
+python scripts/edit_image.py --prompt "帽子を赤いベレー帽に置き換える" --image ./photo.png --mask ./hat_mask.png
+
+# 複数画像のマージ: ベース画像のオブジェクトを2枚目の画像のオブジェクトに置換
+python scripts/edit_image.py \
+  --prompt "人物が持つカバンを、2枚目の画像の赤いリュックに置き換える" \
+  --image ./base.png \
+  --image ./red_backpack.png \
+  --mask ./bag_region.png
+```
+
+成功すると、保存した各ファイルの絶対パスが標準出力に表示されます（命名規則は生成と同一）。
+
+### 編集パラメータ
+
+| 引数 | 環境変数 | 取り得る値 | 既定 | 備考 |
+|------|----------|------------|------|------|
+| `--prompt` | （なし） | 任意のテキスト | **必須** | 編集内容の指示 |
+| `--image` | （なし） | 画像パス（複数可） | **必須（1枚以上）** | 入力画像。複数でマージ。先頭がベース。`png`/`jpg`/`jpeg`/`webp`、最大 16 枚 |
+| `--mask` | （なし） | 透過 PNG パス | （任意） | 編集領域（透過部分のみ編集）。PNG 必須 |
+| `--size` | `GPT_IMAGE_EDIT_SIZE` | `WxH` または `auto` | `auto` | `auto` は入力画像に追従。`WxH` 指定時は生成と同じ制約 |
+| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high` | `high` | |
+| `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | |
+| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent` | `auto` | `transparent` は `--format png` 必須 |
+| `--compression` | `GPT_IMAGE_COMPRESSION` | `0`–`100` | `100` | JPEG のみ |
+| `--n` | `GPT_IMAGE_N` | `1`–`10` | `1` | 生成枚数 |
+| `--user` | `GPT_IMAGE_USER` | 任意の文字列 | （任意） | 利用状況トラッキング用 ID |
+| `--output` | `GPT_IMAGE_OUTPUT_DIR` | ディレクトリパス | `./images` | 無ければ作成 |
+
+---
+
 ## 認証
 
 1. **Microsoft Entra ID（キーレス・優先）。** `DefaultAzureCredential` を使用。ローカルでは `az login`、クラウドでは Managed Identity を利用します。長期間有効なキーを保存しません。
@@ -221,7 +269,7 @@ cd .claude/skills/gpt-image-2
 python -m pytest -q
 ```
 
-テストは、検証・認証解決・保存/命名・API クライアント（HTTP モック）・`.env` 読み込み・パラメータ既定値の優先順位・CLI オーケストレーションを網羅しています。
+テストは、検証・認証解決・保存/命名・API クライアント（HTTP モック、生成と編集の両方）・複数画像マージ/マスク処理・編集の入力検証・`.env` 読み込み・パラメータ既定値の優先順位・`generate_image.py` と `edit_image.py` 双方の CLI オーケストレーションを網羅しています。
 
 本プロジェクトは Kiro 流の仕様駆動開発で構築しました。仕様は `.kiro/specs/gpt-image-2-skill/` 以下にあります。
 

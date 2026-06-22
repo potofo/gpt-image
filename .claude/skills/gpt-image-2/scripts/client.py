@@ -8,9 +8,18 @@ from __future__ import annotations
 
 import base64
 import time
+from pathlib import Path
 from typing import Callable, Literal, Optional
 
-from models import AuthHeader, AzureConfig, GenerationParams
+from models import AuthHeader, AzureConfig, EditParams, GenerationParams
+
+# 入力画像の拡張子から multipart の MIME タイプを引く
+_MIME_BY_EXT = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
 
 ErrorKind = Literal["auth", "rate_limit", "bad_request", "moderation", "timeout", "unknown"]
 
@@ -33,10 +42,10 @@ class ApiError(Exception):
         self.status = status
 
 
-def _build_url(config: AzureConfig) -> str:
+def _build_url(config: AzureConfig, operation: str = "generations") -> str:
     return (
         f"{config.endpoint}/openai/deployments/{config.deployment}"
-        f"/images/generations?api-version={config.api_version}"
+        f"/images/{operation}?api-version={config.api_version}"
     )
 
 
@@ -90,35 +99,24 @@ def _raise_for_status(response) -> None:
     )
 
 
-def generate(
-    config: AzureConfig,
-    auth: AuthHeader,
-    params: GenerationParams,
-    timeout: float = 120.0,
-    max_retries: int = 3,
-    http_post: Optional[Callable] = None,
-    sleep: Callable[[float], None] = time.sleep,
+def _request_with_retry(
+    do_post: Callable[[], object],
+    timeout: float,
+    max_retries: int,
+    sleep: Callable[[float], None],
 ) -> list[bytes]:
-    """画像を生成し、デコード済み画像バイト列のリストを返す。
+    """do_post を実行し、200 ならデコード済み画像を返す共通リトライループ。
 
     429（レート制限）は上限 max_retries 回まで指数バックオフで再試行する。
     その他の HTTP エラー・タイムアウトは分類済みの ApiError を送出する。
+    do_post はヘッダ・ボディ等を内包した引数なしの POST 呼び出し。
     """
-    if http_post is None:
-        import requests
-
-        http_post = requests.post
-
     import requests
-
-    url = _build_url(config)
-    headers = {"Content-Type": "application/json", auth.name: auth.value}
-    body = _build_body(params)
 
     attempt = 0
     while True:
         try:
-            response = http_post(url, headers=headers, json=body, timeout=timeout)
+            response = do_post()
         except requests.exceptions.Timeout:
             raise ApiError(
                 f"API 呼び出しがタイムアウトしました（{timeout} 秒）。", kind="timeout"
@@ -142,6 +140,100 @@ def generate(
             continue
 
         _raise_for_status(response)
+
+
+def generate(
+    config: AzureConfig,
+    auth: AuthHeader,
+    params: GenerationParams,
+    timeout: float = 120.0,
+    max_retries: int = 3,
+    http_post: Optional[Callable] = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[bytes]:
+    """画像を生成し、デコード済み画像バイト列のリストを返す。
+
+    429（レート制限）は上限 max_retries 回まで指数バックオフで再試行する。
+    その他の HTTP エラー・タイムアウトは分類済みの ApiError を送出する。
+    """
+    if http_post is None:
+        import requests
+
+        http_post = requests.post
+
+    url = _build_url(config, "generations")
+    headers = {"Content-Type": "application/json", auth.name: auth.value}
+    body = _build_body(params)
+
+    return _request_with_retry(
+        lambda: http_post(url, headers=headers, json=body, timeout=timeout),
+        timeout, max_retries, sleep,
+    )
+
+
+def _build_edit_data(params: EditParams) -> dict:
+    """images/edits の multipart 非ファイルフィールド（data）を組み立てる。"""
+    data: dict = {
+        "prompt": params.prompt,
+        "n": str(params.n),
+        "quality": params.quality,
+        "output_format": params.output_format,
+        "background": params.background,
+    }
+    # size=auto は API 既定（入力画像に合わせる）に委ねるため送らない
+    if params.size and params.size != "auto":
+        data["size"] = params.size
+    if params.output_format == "jpeg":
+        data["output_compression"] = str(params.output_compression)
+    if params.user:
+        data["user"] = params.user
+    return data
+
+
+def _open_image_part(path: str, read_bytes: Callable[[str], bytes]):
+    """multipart 用の (filename, bytes, mime) タプルを作る。"""
+    p = Path(path)
+    mime = _MIME_BY_EXT.get(p.suffix.lower(), "application/octet-stream")
+    return (p.name, read_bytes(path), mime)
+
+
+def edit(
+    config: AzureConfig,
+    auth: AuthHeader,
+    params: EditParams,
+    timeout: float = 180.0,
+    max_retries: int = 3,
+    http_post: Optional[Callable] = None,
+    sleep: Callable[[float], None] = time.sleep,
+    read_bytes: Optional[Callable[[str], bytes]] = None,
+) -> list[bytes]:
+    """既存画像をプロンプトで編集し、デコード済み画像バイト列のリストを返す。
+
+    images に複数画像を渡すと参照素材として合成（マージ）できる。先頭画像が
+    ベース、mask があれば mask の透過領域のみが編集対象（インペインティング）。
+    multipart/form-data で送信する（Content-Type は requests が境界付きで設定）。
+    """
+    if http_post is None:
+        import requests
+
+        http_post = requests.post
+    if read_bytes is None:
+        read_bytes = lambda path: Path(path).read_bytes()
+
+    url = _build_url(config, "edits")
+    # multipart のため Content-Type は付けない（requests が boundary 付きで設定）
+    headers = {auth.name: auth.value}
+
+    # 複数画像は image[] を繰り返す（単一でも image[] で統一）
+    files = [("image[]", _open_image_part(path, read_bytes)) for path in params.images]
+    if params.mask is not None:
+        files.append(("mask", _open_image_part(params.mask, read_bytes)))
+    data = _build_edit_data(params)
+
+    return _request_with_retry(
+        lambda: http_post(url, headers=headers, files=files, data=data, timeout=timeout),
+        timeout, max_retries, sleep,
+    )
 
 
 def _decode_images(response) -> list[bytes]:

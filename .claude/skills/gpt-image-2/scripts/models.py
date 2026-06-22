@@ -5,7 +5,7 @@ API 詳細やシークレットを各層に散らさないよう、生成パラ�
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 Quality = Literal["low", "medium", "high"]
@@ -19,6 +19,29 @@ class GenerationParams:
 
     prompt: str
     size: str = "1024x1024"
+    quality: Quality = "high"
+    output_format: OutputFormat = "png"
+    background: Background = "auto"
+    output_compression: int = 100
+    n: int = 1
+    user: Optional[str] = None
+    output_dir: str = "./images"
+
+
+@dataclass(frozen=True)
+class EditParams:
+    """画像編集（images/edits）の入力パラメータ。
+
+    既存画像をプロンプトで修正する。images に複数画像を渡すと、それらを
+    参照素材として合成（マージ）できる。先頭画像をベースとして扱い、mask を
+    与えると mask の透過領域のみが編集対象となる（インペインティング）。
+    size の既定は "auto"（入力画像に合わせる）。
+    """
+
+    prompt: str
+    images: tuple[str, ...] = field(default_factory=tuple)  # 1枚以上の入力画像パス
+    mask: Optional[str] = None                              # 任意: 編集領域を示す PNG マスク
+    size: str = "auto"
     quality: Quality = "high"
     output_format: OutputFormat = "png"
     background: Background = "auto"

@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import sys
 from dataclasses import replace
+from pathlib import Path
 
-from models import GenerationParams
+from models import EditParams, GenerationParams
 
 # gpt-image-2 の size 制約
 SIZE_MULTIPLE = 16
@@ -25,6 +26,14 @@ MAX_N = 10
 MIN_COMPRESSION = 0
 MAX_COMPRESSION = 100
 DEFAULT_COMPRESSION = 100
+
+# 画像編集（images/edits）の制約
+MIN_INPUT_IMAGES = 1
+MAX_INPUT_IMAGES = 16
+# 入力画像として受け付ける拡張子（API が受け付ける形式）
+VALID_INPUT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+# size に "auto"（入力画像に合わせる）を許可する
+AUTO_SIZE = "auto"
 
 
 class ValidationError(Exception):
@@ -127,4 +136,52 @@ def validate_params(params: GenerationParams) -> GenerationParams:
     """すべての制約を検証し、正規化済みパラメータを返す。違反時は ValidationError。"""
     _validate_enums(params)
     _validate_size(params.size)
+    return _validate_dependencies(params)
+
+
+def _validate_input_image(path: str, *, role: str = "画像") -> None:
+    """入力画像（または mask）パスの存在・種別・拡張子を検証する。"""
+    if not path or not path.strip():
+        raise ValidationError(f"{role}のパスが空です。")
+    p = Path(path).expanduser()
+    if not p.exists():
+        raise ValidationError(f"{role}が見つかりません: {path}")
+    if not p.is_file():
+        raise ValidationError(f"{role}はファイルである必要があります: {path}")
+    if p.suffix.lower() not in VALID_INPUT_EXTENSIONS:
+        raise ValidationError(
+            f"{role}の形式 '{p.suffix}' は非対応です。"
+            f"{sorted(VALID_INPUT_EXTENSIONS)} のいずれかを指定してください: {path}"
+        )
+
+
+def validate_edit_params(params: EditParams) -> EditParams:
+    """画像編集パラメータを検証し、正規化済みパラメータを返す。違反時は ValidationError。
+
+    生成と共通の列挙値・依存関係に加え、入力画像（1〜16枚）と mask、size を検証する。
+    size が "auto" の場合はサイズ制約検証をスキップする（入力画像に合わせる）。
+    """
+    _validate_enums(params)
+
+    if not params.images:
+        raise ValidationError(
+            "編集には最低 1 枚の入力画像が必要です（--image を指定してください）。"
+        )
+    if len(params.images) > MAX_INPUT_IMAGES:
+        raise ValidationError(
+            f"入力画像は最大 {MAX_INPUT_IMAGES} 枚までです（指定枚数: {len(params.images)}）。"
+        )
+    for image_path in params.images:
+        _validate_input_image(image_path, role="入力画像")
+
+    if params.mask is not None:
+        _validate_input_image(params.mask, role="マスク画像")
+        if Path(params.mask).suffix.lower() != ".png":
+            raise ValidationError(
+                f"マスク画像は PNG 形式である必要があります: {params.mask}"
+            )
+
+    if params.size != AUTO_SIZE:
+        _validate_size(params.size)
+
     return _validate_dependencies(params)

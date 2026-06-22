@@ -89,3 +89,54 @@
   - 観測可能な完了条件: 両認証経路で実画像が保存され、透過 PNG が生成される（acceptance criteria 6.3/6.4 を実機で確認）
   - _Requirements: 6.3, 6.4_
   - _Depends: 3.1_
+
+## 5. 拡張: 設定の優先順位・.env・命名（初版後に追加）
+
+> 初版（生成のみ）リリース後に実装済み。本セクションはスペックドリフトの遡及記録。
+
+- [x] 5.1 `.env` サポートと既定値の優先順位解決
+  - カレントから上位へ `.env` を探索して読み込み、OS 環境変数を上書きせず未設定分のみ補完する
+  - 各任意引数を「CLI 引数 > 環境変数(.env) > 組み込み既定」で解決する（`GPT_IMAGE_*`）
+  - `AZURE_OPENAI_API_VERSION` を環境変数から取得し、未設定時は既定 `2025-04-01-preview` にフォールバックする
+  - 観測可能な完了条件: `.env` の値が CLI 未指定時に反映され、OS 環境変数が優先される（`tests/test_dotenv.py`, `tests/test_env_defaults.py`）
+  - _Requirements: 2.5, 6.1, 6.2.1_
+  - _Boundary: Config Loader_
+
+- [x] 5.2 プロンプト由来 title による一意ファイル名
+  - プロンプトから安全な title を導出（禁止文字除去・空白ハイフン化・切り詰め・空なら image）し、`<title>_<timestamp>_<index>.<ext>`（マイクロ秒精度）で保存する
+  - 保存先の既定を `./images` とし、無ければ作成する
+  - 観測可能な完了条件: プロンプト由来の読みやすいファイル名で保存され、`--n>1` が連番になる（`tests/test_storage.py`, `tests/test_title.py`）
+  - _Requirements: 5.2, 5.3, 2.2_
+  - _Boundary: Image Storage_
+
+## 6. 拡張: 画像編集（images/edits・初版後に追加）
+
+> 初版スコープ外だった編集機能を、共通層を再利用して追加実装済み。本セクションはその遡及記録。
+
+- [x] 6.1 EditParams 型と編集入力検証
+  - `EditParams`（images: 1〜16, mask, size 既定 auto 等）を共通型に追加する
+  - 入力画像の存在/種別/拡張子（.png/.jpg/.jpeg/.webp）、mask の PNG 必須、size!="auto" 時の size 制約を検証し、列挙値・依存関係は生成と共通化する
+  - 観測可能な完了条件: 不正な枚数・欠落・非対応拡張子・非 PNG マスクが API 前にエラー化する（`tests/test_edit_validation.py`）
+  - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5_
+  - _Boundary: Parameter Validation_
+
+- [x] 6.2 編集 API クライアント（multipart）
+  - 共通リトライ/エラー分類を `_request_with_retry` に抽出し、`generate` と共有する
+  - `images/edits` へ multipart で POST する `edit()` を追加（`image[]` 繰り返し、任意 `mask`、Content-Type 非設定、size=auto は省略、compression は jpeg 時のみ）
+  - 観測可能な完了条件: 単一/複数画像・mask の送信、auto 省略、429 リトライ、エラー分類がモックで検証される（`tests/test_edit_client.py`）
+  - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 8.3_
+  - _Boundary: Image API Client_
+  - _Depends: 6.1_
+
+- [x] 6.3 編集 CLI エントリポイントとマージ対応
+  - `edit_image.py` を追加し、`--prompt` と最低 1 個の `--image`（複数でマージ・先頭ベース）、`--mask` ほかを公開する
+  - 検証 → 認証 → `edit` → 保存を統括し、結果の絶対パスを stdout に出力する（生成と同一規約）
+  - 観測可能な完了条件: 単一編集・複数画像マージが完走しパスが出力され、不正引数/欠落画像/API エラーで非ゼロ終了する（`tests/test_edit_image.py`）
+  - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 12.1, 12.2_
+  - _Depends: 6.1, 6.2_
+
+- [x] 6.4 SKILL.md の編集機能ドキュメント
+  - frontmatter の `description` に編集系トリガー語を追加し、編集の2モード（単一編集・マージ）、`--mask` の使い方、パラメータ表、コマンド例を記載する
+  - 観測可能な完了条件: 編集系依頼でスキルが読み込まれ、コマンド例どおりに `edit_image.py` を起動できる
+  - _Requirements: 1.1, 1.3, 1.4, 12.3_
+  - _Depends: 6.3_

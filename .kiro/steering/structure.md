@@ -5,7 +5,7 @@
 本リポジトリは2つのレイヤーで構成される。
 
 1. **開発プロセス基盤** — Kiro 流の Spec-Driven Development を駆動する仕組み（`.kiro/`、`.claude/commands/`）。
-2. **プロダクト成果物** — Claude Code の Agent Skill 本体（`.claude/skills/gpt-image-2/`、これから実装）。
+2. **プロダクト成果物** — Claude Code の Agent Skill 本体（`.claude/skills/gpt-image-2/`、実装済み・生成＋編集）。
 
 スキルは「自己完結したディレクトリ」として配置し、起動条件・手順（`SKILL.md`）と実行ロジック（`scripts/`）を分離する。
 
@@ -19,9 +19,11 @@
 .claude/skills/gpt-image-2/
 ├── SKILL.md              # frontmatter（name/description にトリガー語）+ 前提・パラメータ要約・コマンド例
 ├── scripts/
-│   └── generate_image.py # 画像生成本体（CLI 引数 + 検証 + 保存）
-└── references/
-    └── parameters.md     # パラメータ詳細リファレンス（任意）
+│   ├── generate_image.py # 画像生成 CLI（images/generations）
+│   ├── edit_image.py     # 画像編集 CLI（images/edits・単一/マージ/mask）
+│   └── （config/models/validation/auth/client/storage を共通モジュールとして分割）
+├── tests/                # pytest
+└── requirements.txt
 ```
 
 ### 仕様（Specs）
@@ -34,8 +36,15 @@
 
 ## 出力ファイルの命名規則
 
-- 生成画像: `gpt-image-2_<timestamp>_<index>.<ext>`（`--n > 1` のときは連番で保存）。
+- 生成・編集画像: `<title>_<timestamp>_<index>.<ext>`。`<title>` はプロンプトから導出した安全なファイル名（禁止文字除去・空白ハイフン化・切り詰め、空なら `image`）、`<timestamp>` はマイクロ秒精度。`--n > 1` のときは同一 timestamp + 連番で保存。
+- 既定の保存先は `./images`（無ければ自動作成、`--output`／`GPT_IMAGE_OUTPUT_DIR` で変更可）。
 - 保存後は **絶対パスを `stdout`** に出力し、Claude がユーザーに提示できるようにする。
+
+## 設定・既定値の解決
+
+- 認証・接続: `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT`（必須）、`AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_API_VERSION`（任意）。
+- パラメータ既定値: `GPT_IMAGE_*`（`GPT_IMAGE_SIZE` 等）。優先順位は **CLI 引数 > `.env`（環境変数） > 組み込み既定**。
+- `.env` はカレントから上位へ探索し、OS 環境変数を上書きせず未設定分のみ補完する。
 
 ## ドキュメントの言語
 

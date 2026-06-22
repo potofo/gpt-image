@@ -17,16 +17,19 @@ Claude Code 上で「画像を生成して」という依頼があったとき�
 
 ## 2. スコープ
 
+> 注（2026-06-23 更新）: 本書は初版（生成のみ）の要件メモ。実装はその後、画像編集（images/edits）と `.env`／環境変数による既定値解決を追加した。最新の正式要件は `.kiro/specs/gpt-image-2-skill/requirements.md`（Requirement 9〜12 ほか）を参照のこと。
+
 含むもの:
 
 - テキストプロンプトからの画像生成（images/generations）
+- 画像編集（images/edits）: 単一画像のプロンプト編集、複数画像のマージ（オブジェクト置換）、`mask` によるインペインティング
 - `size`・`quality`・`output_format`・`background`・`output_compression`・`n` のパラメータ制御
-- 生成画像のローカル保存（Base64 デコード）
+- 生成・編集画像のローカル保存（Base64 デコード）
+- `.env`／環境変数（`GPT_IMAGE_*`）による既定値解決（優先順位: CLI 引数 > `.env` > 組み込み既定）
 - 認証情報の安全な受け渡し
 
-含まないもの（初版では対象外。将来拡張）:
+含まないもの（将来拡張）:
 
-- 画像編集（images/edits）・マスク・インペインティング
 - ストリーミング（`stream` / `partial_images`）
 - バッチ・キュー処理、Web UI
 

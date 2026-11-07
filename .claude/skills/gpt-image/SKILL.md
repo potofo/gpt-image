@@ -30,7 +30,11 @@ API 呼び出し・検証・保存はすべて `scripts/` 配下のスクリプ�
    - `AZURE_OPENAI_API_VERSION` … 既定 `2025-04-01-preview`（任意）
    - `AZURE_OPENAI_API_STYLE` … エンドポイント形式 `deployments`（既定）/ `v1`（任意）
    - `AZURE_OPENAI_TOKEN_SCOPE` … Entra ID のトークンスコープ（任意。既定 `https://cognitiveservices.azure.com/.default`）
-3. **`.env` 対応**: プロジェクトフォルダ直下に `.env` を置くと自動で読み込まれます（カレントディレクトリから上位へ探索）。`.env.example` をコピーして使ってください。**OS 環境変数が優先**され、`.env` は未設定分のみ補完します。
+3. **`.env` 対応**: 次の 2 か所の `.env` が自動で読み込まれます。`.env.example` をコピーして使ってください。
+   - プロジェクトの `.env`（カレントディレクトリから上位へ探索し、最初に見つかったもの）
+   - スキルフォルダの `.env`（この `SKILL.md` と同じフォルダ。グローバルインストール時に、どのプロジェクトからでも使える共通設定を置く場所）
+
+   優先順位は **OS 環境変数 > プロジェクトの `.env` > スキルフォルダの `.env`** です。どれも未設定の値だけを補完します。
 4. 認証は **Entra ID（キーレス）を優先**します。`az login` 済みなら自動でトークンを使用し、未構成なら `AZURE_OPENAI_API_KEY` にフォールバックします。
 5. Python 3.10+ と依存ライブラリ（`pip install -r requirements.txt`：`requests`, `azure-identity`）。
 

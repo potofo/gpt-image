@@ -44,7 +44,7 @@
 
 - 認証・接続: `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT`（必須）、`AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_API_VERSION`（任意）。
 - パラメータ既定値: `GPT_IMAGE_*`（`GPT_IMAGE_SIZE` 等）。優先順位は **CLI 引数 > `.env`（環境変数） > 組み込み既定**。
-- `.env` はカレントから上位へ探索し、OS 環境変数を上書きせず未設定分のみ補完する。
+- `.env` はプロジェクトの `.env`（カレントから上位へ探索）とスキルフォルダの `.env`（`SKILL.md` と同じフォルダ）の順に適用し、どちらも未設定分のみ補完する。優先順位は OS 環境変数 > プロジェクトの `.env` > スキルフォルダの `.env`。
 
 ## ドキュメントの言語
 

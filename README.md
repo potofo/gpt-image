@@ -101,12 +101,11 @@ Then edit `.env` and fill in your Azure values.
 
 ### 2. How `.env` is discovered and applied
 
-- When the skill runs, it searches for a `.env` file **starting from the current working directory and walking up** the directory tree, using the first one it finds. Place `.env` at your project root.
-- **OS environment variables always take precedence.** `.env` only fills in variables that are not already set in your shell.
-- Because discovery is relative to where you run Claude Code (not where the skill is installed), for a **globally installed** skill you should either:
-  - put a `.env` in each project where you use it, or
-  - set the variables as OS-level environment variables, or
-  - place a single `.env` in a parent directory that covers your projects.
+- When the skill runs, it loads up to two `.env` files:
+  1. **Project `.env`** — found by searching **from the current working directory upward**; the first one wins. Place it at your project root.
+  2. **Skill-folder `.env`** — the `.env` next to `SKILL.md` (e.g. `~/.claude/skills/gpt-image/.env`). Use it for shared settings when the skill is **installed globally**, so every project can use it without its own `.env`.
+- **Precedence: OS environment variables > project `.env` > skill-folder `.env`.** Each file only fills in variables that are not already set, so a project `.env` can override just the values it needs (for example `GPT_IMAGE_MODEL`).
+- Both files are excluded from git by the `.env` pattern in `.gitignore`.
 
 ### 3. Azure connection variables
 

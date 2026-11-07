@@ -25,6 +25,8 @@ DEFAULT_V1_API_VERSION = "preview"
 VALID_API_STYLES = ("deployments", "v1")
 
 DOTENV_FILENAME = ".env"
+# スキルフォルダ（scripts/ の親）。グローバルインストール時も .env を置けるようにする
+SKILL_DIR = str(Path(__file__).resolve().parent.parent)
 
 
 class ConfigError(Exception):
@@ -89,11 +91,33 @@ def find_dotenv(start: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def load_dotenv_files(start: Optional[str] = None,
+                      skill_dir: Optional[str] = None) -> list[str]:
+    """プロジェクトの .env とスキルフォルダの .env を順に適用し、適用したパスを返す。
+
+    1. start（既定: カレント）から上位へ探して最初に見つかった .env
+    2. スキルフォルダ（既定: SKILL_DIR）直下の .env
+    どちらも既存の値を上書きしないため、優先順位は
+    「OS 環境変数 > プロジェクトの .env > スキルフォルダの .env」になる。
+    同じファイルを指す場合は 1 回だけ適用する。
+    """
+    candidates = [find_dotenv(start)]
+    skill_env = Path(skill_dir or SKILL_DIR) / DOTENV_FILENAME
+    if skill_env.is_file():
+        candidates.append(str(skill_env.resolve()))
+
+    applied: list[str] = []
+    for path in candidates:
+        if path and path not in applied:
+            apply_env_file(path)
+            applied.append(path)
+    return applied
+
+
 def load_project_dotenv() -> Optional[str]:
-    """カレントディレクトリから上位の .env を探して適用し、適用したパスを返す。"""
-    path = find_dotenv()
-    apply_env_file(path)
-    return path
+    """プロジェクトとスキルフォルダの .env を適用し、最初に適用したパスを返す。"""
+    applied = load_dotenv_files()
+    return applied[0] if applied else None
 
 
 def _env(name: str) -> str:

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Optional, Protocol
 
-from models import AuthHeader
+from models import DEFAULT_TOKEN_SCOPE, AuthHeader
 
-# Azure Cognitive Services / OpenAI 向けトークンスコープ
-TOKEN_SCOPE = "https://cognitiveservices.azure.com/.default"
+# Azure Cognitive Services / OpenAI 向けトークンスコープ（既定）
+TOKEN_SCOPE = DEFAULT_TOKEN_SCOPE
 
 
 class AuthError(Exception):
@@ -39,10 +39,11 @@ def _default_credential() -> Optional[TokenCredential]:
 def resolve_auth(
     api_key: Optional[str],
     credential: Optional[TokenCredential] = None,
+    scope: str = TOKEN_SCOPE,
 ) -> AuthHeader:
     """認証ヘッダを解決する。
 
-    1. Entra ID トークン取得を試行（成功すれば Bearer）。
+    1. Entra ID トークン取得を scope で試行（成功すれば Bearer）。
     2. 失敗・未構成なら api_key を使用（api-key ヘッダ）。
     3. どちらも不可なら AuthError（シークレット値は含めない）。
     """
@@ -51,7 +52,7 @@ def resolve_auth(
 
     if credential is not None:
         try:
-            token = credential.get_token(TOKEN_SCOPE)
+            token = credential.get_token(scope)
             return AuthHeader(name="Authorization", value=f"Bearer {token.token}")
         except Exception:
             # Entra ID が利用できない場合は API キーへフォールバックする

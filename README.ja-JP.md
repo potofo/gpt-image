@@ -1,8 +1,8 @@
-# gpt-image-2 画像生成・編集スキル
+# gpt-image 画像生成・編集スキル
 
 *他の言語で読む: [English](./README.md)*
 
-Azure AI Foundry（Microsoft Foundry）の `gpt-image-2` モデルを使い、画像を**生成・編集**してローカルに保存する [Claude Code](https://claude.com/claude-code) **Agent Skill** です。テキストからの画像生成（`images/generations`）に加え、画像編集（`images/edits`）として、単一画像のプロンプト編集・複数画像のマージ（オブジェクト置換）・マスクによるインペインティングに対応します。
+Azure AI Foundry（Microsoft Foundry）の画像モデル `gpt-image-2`・`gpt-image-2.5-flare`・`gpt-image-2.5-sunburst` を使い、画像を**生成・編集**してローカルに保存する [Claude Code](https://claude.com/claude-code) **Agent Skill** です。テキストからの画像生成（`images/generations`）に加え、画像編集（`images/edits`）として、単一画像のプロンプト編集・複数画像のマージ（オブジェクト置換）・マスクによるインペインティングに対応します。
 
 このスキルは次の2つの方針に従います。
 
@@ -18,7 +18,8 @@ Azure AI Foundry（Microsoft Foundry）の `gpt-image-2` モデルを使い、�
   - **単一画像の編集** — 既存画像をプロンプトで修正
   - **複数画像のマージ** — 複数画像を渡して合成（ベース画像の一部オブジェクトを別画像のオブジェクトに置換）
   - **マスクによるインペインティング** — 透過 PNG マスクの透過領域のみを編集
-- 全パラメータ制御: `size` / `quality` / `output_format` / `background` / `output_compression` / `n` / `user`
+- **モデルの選択** — `gpt-image-2`（既定）、`gpt-image-2.5-flare`（高速・日常用途）、`gpt-image-2.5-sunburst`（最も精密）。モデルごとにデプロイを切り替え可能
+- 全パラメータ制御: `size` / `quality` / `output_format` / `background` / `output_compression` / `n` / `user`（`complexity` と markup による編集指示は実装済みだが、現在 Azure が受け付けないため無効）
 - API 呼び出し前の事前検証（size 制約・パラメータ依存関係、編集時は入力画像の枚数/存在/種別/拡張子・PNG マスク）
 - キーレスの **Microsoft Entra ID** 認証（優先）と **API キー** フォールバック
 - 認証情報**および**デフォルトパラメータの `.env` 対応
@@ -29,7 +30,7 @@ Azure AI Foundry（Microsoft Foundry）の `gpt-image-2` モデルを使い、�
 ## 前提条件
 
 - Azure サブスクリプションと Azure OpenAI（Foundry）リソース。
-- `gpt-image-2` モデルがデプロイ済みであること。gpt-image 系は[限定アクセス登録](https://aka.ms/oai/access)が必要です。
+- `gpt-image-2`・`gpt-image-2.5-flare`・`gpt-image-2.5-sunburst` のいずれか 1 つ以上がデプロイ済みであること。
 - API バージョン `2025-04-01-preview` 以降（`2024-02-01` 等の古い版は gpt-image-2 **非対応**）。
 - Python 3.10+ と `requirements.txt` の依存ライブラリ（`requests`, `azure-identity`）。
 
@@ -112,9 +113,24 @@ cp .env.example .env      # macOS / Linux
 | 変数 | 必須 | 説明 |
 |------|------|------|
 | `AZURE_OPENAI_ENDPOINT` | ✅ | リソースのベース URL。例: `https://<resource>.openai.azure.com`（デプロイ名やパスは含めない） |
-| `AZURE_OPENAI_DEPLOYMENT` | ✅ | `gpt-image-2` に付けたデプロイ名 |
+| `AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2` / `AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_FLARE` / `AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_SUNBURST` | ✅* | モデル種別ごとのデプロイ名。選んだモデル種別に対応するものが使われる |
+| `AZURE_OPENAI_DEPLOYMENT` | ✅* | モデル種別ごとの変数が無いときに使う共通のデプロイ名 |
 | `AZURE_OPENAI_API_KEY` | — | API キー認証時のみ。未設定ならキーレス（Entra ID）認証を使用 |
-| `AZURE_OPENAI_API_VERSION` | — | 既定 `2025-04-01-preview` |
+| `AZURE_OPENAI_API_VERSION` | — | 既定 `2025-04-01-preview`（`AZURE_OPENAI_API_STYLE=v1` のときは `preview`） |
+| `AZURE_OPENAI_API_STYLE` | — | エンドポイント形式。`deployments`（既定）または `v1`（`/openai/v1/images/...`） |
+| `AZURE_OPENAI_TOKEN_SCOPE` | — | Entra ID のトークンスコープ。既定 `https://cognitiveservices.azure.com/.default` |
+
+\* モデル種別ごとの変数と `AZURE_OPENAI_DEPLOYMENT` のどちらかを設定してください。
+
+2.5 系の 2 つのモデルを使い分ける場合は、両方をデプロイしてモデル種別ごとに設定します。
+
+```dotenv
+GPT_IMAGE_MODEL=gpt-image-2.5-flare
+AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_FLARE=<Flare のデプロイ名>
+AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_SUNBURST=<Sunburst のデプロイ名>
+```
+
+呼び出しごとに `--model gpt-image-2.5-sunburst` で切り替えられます。
 
 ### 4. `.env` でのデフォルトパラメータ設定（重要機能）
 
@@ -124,10 +140,12 @@ cp .env.example .env      # macOS / Linux
 
 | パラメータ | 環境変数 | 組み込み既定 | 取り得る値 |
 |------------|----------|--------------|------------|
+| モデル種別 | `GPT_IMAGE_MODEL` | `gpt-image-2` | `gpt-image-2` / `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` |
 | size | `GPT_IMAGE_SIZE` | `1024x1024` | `WxH`（後述の size 制約参照） |
-| quality | `GPT_IMAGE_QUALITY` | `high` | `low` / `medium` / `high` |
+| quality | `GPT_IMAGE_QUALITY` | `high` | `low` / `medium` / `high`（2.5 系は `xhigh` / `max` / `auto` も可） |
 | 出力形式 | `GPT_IMAGE_FORMAT` | `png` | `png` / `jpeg`（WEBP 非対応） |
-| 背景 | `GPT_IMAGE_BACKGROUND` | `auto` | `auto` / `transparent`（transparent は `png` 必須） |
+| 背景 | `GPT_IMAGE_BACKGROUND` | `auto` | `auto` / `transparent`（2.5 系は `opaque` も可。transparent は `png` 必須） |
+| complexity | `GPT_IMAGE_COMPLEXITY` | （なし） | `low` / `medium` / `high`（2.5 系のみ。現在 Azure では使えない） |
 | 圧縮 | `GPT_IMAGE_COMPRESSION` | `100` | `0`–`100`（JPEG のみ） |
 | 枚数 | `GPT_IMAGE_N` | `1` | `1`–`10` |
 | 出力先 | `GPT_IMAGE_OUTPUT_DIR` | `./images` | 任意のディレクトリパス（無ければ作成） |
@@ -185,15 +203,19 @@ python scripts/generate_image.py --prompt "猫のキャラクター案" --n 4 --
 |------|----------|------------|------|------|
 | `--prompt` | （なし） | 任意のテキスト | **必須** | 生成内容の指示 |
 | `--size` | `GPT_IMAGE_SIZE` | `WxH` | `1024x1024` | 推奨: `1024x1024`, `1536x1024`, `1024x1536` |
-| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high` | `high` | `low` は低遅延向け |
-| `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | WEBP は Azure 非対応 |
-| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent` | `auto` | `transparent` は `--format png` 必須 |
+| `--model` | `GPT_IMAGE_MODEL` | `gpt-image-2`/`gpt-image-2.5-flare`/`gpt-image-2.5-sunburst` | `gpt-image-2` | 呼び出し先のデプロイと一致させる |
+| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high`（2.5 系は + `xhigh`/`max`/`auto`） | `high` | `low` は低遅延向け。2.5 系の `high` は gpt-image-2 の `high` より消費トークンが少ない |
+| `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | WEBP は Azure では現在使えない |
+| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent`（2.5 系は + `opaque`） | `auto` | `transparent` は `--format png` 必須 |
 | `--compression` | `GPT_IMAGE_COMPRESSION` | `0`–`100` | `100` | JPEG のみ |
+| `--complexity` | `GPT_IMAGE_COMPLEXITY` | `low`/`medium`/`high` | （なし） | 2.5 系のみ。**現在 Azure では使えない**（未知のパラメータとして拒否される） |
 | `--n` | `GPT_IMAGE_N` | `1`–`10` | `1` | 生成枚数 |
 | `--user` | `GPT_IMAGE_USER` | 任意の文字列 | （任意） | 利用状況トラッキング用 ID |
 | `--output` | `GPT_IMAGE_OUTPUT_DIR` | ディレクトリパス | `./images` | 無ければ作成 |
 
-### size 制約（gpt-image-2）
+### size 制約（全モデル共通）
+
+2.5 系では、総ピクセル数が 2560x1440 を超える解像度は experimental です（警告を表示して続行します）。
 
 `--size` は次を**すべて**満たす必要があり、違反時は API 呼び出し前にエラーになります。
 
@@ -241,11 +263,13 @@ python scripts/edit_image.py \
 |------|----------|------------|------|------|
 | `--prompt` | （なし） | 任意のテキスト | **必須** | 編集内容の指示 |
 | `--image` | （なし） | 画像パス（複数可） | **必須（1枚以上）** | 入力画像。複数でマージ。先頭がベース。`png`/`jpg`/`jpeg`/`webp`、最大 16 枚 |
-| `--mask` | （なし） | 透過 PNG パス | （任意） | 編集領域（透過部分のみ編集）。PNG 必須 |
+| `--mask` | （なし） | 透過 PNG パス | （任意） | 編集領域（透過部分のみ編集）。PNG 必須。`--markup` と併用不可 |
+| `--markup` | （なし） | 透過 PNG パス | （任意） | 2.5 系のみ。**現在 Azure では使えない**（未知のパラメータとして拒否される）。代わりに `--mask` を使う |
+| `--model` / `--complexity` | `GPT_IMAGE_MODEL` / `GPT_IMAGE_COMPLEXITY` | 生成と同じ | 生成と同じ | |
 | `--size` | `GPT_IMAGE_EDIT_SIZE` | `WxH` または `auto` | `auto` | `auto` は入力画像に追従。`WxH` 指定時は生成と同じ制約 |
-| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high` | `high` | |
+| `--quality` | `GPT_IMAGE_QUALITY` | 生成と同じ（モデル種別で変わる） | `high` | |
 | `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | |
-| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent` | `auto` | `transparent` は `--format png` 必須 |
+| `--background` | `GPT_IMAGE_BACKGROUND` | 生成と同じ（モデル種別で変わる） | `auto` | `transparent` は `--format png` 必須 |
 | `--compression` | `GPT_IMAGE_COMPRESSION` | `0`–`100` | `100` | JPEG のみ |
 | `--n` | `GPT_IMAGE_N` | `1`–`10` | `1` | 生成枚数 |
 | `--user` | `GPT_IMAGE_USER` | 任意の文字列 | （任意） | 利用状況トラッキング用 ID |

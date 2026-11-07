@@ -9,14 +9,20 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from models import AzureConfig
+from capabilities import get_capability
+from models import DEFAULT_MODEL, DEFAULT_TOKEN_SCOPE, AzureConfig, ModelName
 
 ENDPOINT_ENV = "AZURE_OPENAI_ENDPOINT"
 DEPLOYMENT_ENV = "AZURE_OPENAI_DEPLOYMENT"
 API_KEY_ENV = "AZURE_OPENAI_API_KEY"
 API_VERSION_ENV = "AZURE_OPENAI_API_VERSION"
+API_STYLE_ENV = "AZURE_OPENAI_API_STYLE"
+TOKEN_SCOPE_ENV = "AZURE_OPENAI_TOKEN_SCOPE"
 
 DEFAULT_API_VERSION = "2025-04-01-preview"
+# v1 形式（/openai/v1/...）で api-version 未指定時に使う値
+DEFAULT_V1_API_VERSION = "preview"
+VALID_API_STYLES = ("deployments", "v1")
 
 DOTENV_FILENAME = ".env"
 
@@ -90,20 +96,27 @@ def load_project_dotenv() -> Optional[str]:
     return path
 
 
-def load_config() -> AzureConfig:
+def _env(name: str) -> str:
+    return (os.environ.get(name) or "").strip()
+
+
+def load_config(model: ModelName = DEFAULT_MODEL) -> AzureConfig:
     """環境変数から AzureConfig を構築する。
 
-    必須（ENDPOINT / DEPLOYMENT）が欠けている場合は ConfigError。
+    デプロイ名は「モデル種別ごとの環境変数 → AZURE_OPENAI_DEPLOYMENT」の順に探す。
+    デプロイ名からモデル種別を推測することはしない。
+    必須（ENDPOINT / デプロイ名）が欠けている場合は ConfigError。
     エラーメッセージには変数名のみを含め、値（特にキー）は含めない。
     """
-    endpoint = (os.environ.get(ENDPOINT_ENV) or "").strip()
-    deployment = (os.environ.get(DEPLOYMENT_ENV) or "").strip()
+    endpoint = _env(ENDPOINT_ENV)
+    model_deployment_env = get_capability(model).deployment_env
+    deployment = _env(model_deployment_env) or _env(DEPLOYMENT_ENV)
 
-    missing = [
-        name
-        for name, value in ((ENDPOINT_ENV, endpoint), (DEPLOYMENT_ENV, deployment))
-        if not value
-    ]
+    missing = []
+    if not endpoint:
+        missing.append(ENDPOINT_ENV)
+    if not deployment:
+        missing.append(f"{model_deployment_env} または {DEPLOYMENT_ENV}")
     if missing:
         raise ConfigError(
             "必須の環境変数が設定されていません: "
@@ -111,11 +124,21 @@ def load_config() -> AzureConfig:
             + "。設定後に再実行してください。"
         )
 
-    api_version = (os.environ.get(API_VERSION_ENV) or "").strip() or DEFAULT_API_VERSION
+    api_style = _env(API_STYLE_ENV) or "deployments"
+    if api_style not in VALID_API_STYLES:
+        raise ConfigError(
+            f"{API_STYLE_ENV} の値が不正です。"
+            f"{' / '.join(VALID_API_STYLES)} のいずれかを指定してください。"
+        )
+    default_version = DEFAULT_V1_API_VERSION if api_style == "v1" else DEFAULT_API_VERSION
+    api_version = _env(API_VERSION_ENV) or default_version
+
     return AzureConfig(
         endpoint=endpoint.rstrip("/"),
         deployment=deployment,
         api_version=api_version,
+        api_style=api_style,  # type: ignore[arg-type]  # VALID_API_STYLES で検証済み
+        token_scope=_env(TOKEN_SCOPE_ENV) or DEFAULT_TOKEN_SCOPE,
     )
 
 

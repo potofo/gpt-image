@@ -1,8 +1,8 @@
-# gpt-image-2 Image Generation & Editing Skill
+# gpt-image Image Generation & Editing Skill
 
 *Read this in other languages: [日本語](./README.ja-JP.md)*
 
-A [Claude Code](https://claude.com/claude-code) **Agent Skill** that generates **and edits** images using the Azure AI Foundry (Microsoft Foundry) `gpt-image-2` model and saves them locally. It supports text-to-image generation (`images/generations`) as well as image editing (`images/edits`): single-image edits, multi-image merge (object replacement), and mask-based inpainting.
+A [Claude Code](https://claude.com/claude-code) **Agent Skill** that generates **and edits** images using Azure AI Foundry (Microsoft Foundry) image models — `gpt-image-2`, `gpt-image-2.5-flare`, and `gpt-image-2.5-sunburst` — and saves them locally. It supports text-to-image generation (`images/generations`) as well as image editing (`images/edits`): single-image edits, multi-image merge (object replacement), and mask-based inpainting.
 
 The skill follows two core principles:
 
@@ -18,7 +18,8 @@ The skill follows two core principles:
   - **Single-image edit** — modify an existing image with a prompt
   - **Multi-image merge** — pass several images to composite them (replace an object in the base image with an object from another image)
   - **Mask-based inpainting** — limit edits to the transparent region of a PNG mask
-- Full parameter control: `size`, `quality`, `output_format`, `background`, `output_compression`, `n`, `user`
+- **Model selection** — `gpt-image-2` (default), `gpt-image-2.5-flare` (fast, everyday quality), `gpt-image-2.5-sunburst` (highest precision), each with its own deployment
+- Full parameter control: `size`, `quality`, `output_format`, `background`, `output_compression`, `n`, `user` (`complexity` and markup-guided edits are implemented but currently rejected by Azure, so they are disabled)
 - Pre-flight validation (size constraints, parameter dependencies, and — for editing — input image count/existence/type/extension and PNG mask) before any API call
 - Keyless **Microsoft Entra ID** authentication (preferred) with **API key** fallback
 - `.env` support for credentials **and** default parameters
@@ -29,7 +30,7 @@ The skill follows two core principles:
 ## Requirements
 
 - An Azure subscription with an Azure OpenAI (Foundry) resource.
-- A deployed `gpt-image-2` model. The gpt-image family requires [limited access registration](https://aka.ms/oai/access).
+- At least one deployed model: `gpt-image-2`, `gpt-image-2.5-flare`, or `gpt-image-2.5-sunburst`.
 - API version `2025-04-01-preview` or later (older versions such as `2024-02-01` do **not** support gpt-image-2).
 - Python 3.10+ with the dependencies in `requirements.txt` (`requests`, `azure-identity`).
 
@@ -112,9 +113,24 @@ Then edit `.env` and fill in your Azure values.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AZURE_OPENAI_ENDPOINT` | ✅ | Resource base URL, e.g. `https://<resource>.openai.azure.com` (no deployment/path) |
-| `AZURE_OPENAI_DEPLOYMENT` | ✅ | The deployment name you gave `gpt-image-2` |
+| `AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2` / `AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_FLARE` / `AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_SUNBURST` | ✅* | Deployment name per model. The one matching the selected model is used |
+| `AZURE_OPENAI_DEPLOYMENT` | ✅* | Fallback deployment name when the per-model variable is not set |
 | `AZURE_OPENAI_API_KEY` | — | Only for API key auth. If omitted, keyless Entra ID auth is used |
-| `AZURE_OPENAI_API_VERSION` | — | Defaults to `2025-04-01-preview` |
+| `AZURE_OPENAI_API_VERSION` | — | Defaults to `2025-04-01-preview` (`preview` when `AZURE_OPENAI_API_STYLE=v1`) |
+| `AZURE_OPENAI_API_STYLE` | — | Endpoint style: `deployments` (default) or `v1` (`/openai/v1/images/...`) |
+| `AZURE_OPENAI_TOKEN_SCOPE` | — | Entra ID token scope. Defaults to `https://cognitiveservices.azure.com/.default` |
+
+\* Set either the per-model variable or `AZURE_OPENAI_DEPLOYMENT`.
+
+To use both 2.5 models side by side, deploy both and set one variable per model:
+
+```dotenv
+GPT_IMAGE_MODEL=gpt-image-2.5-flare
+AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_FLARE=<your-flare-deployment>
+AZURE_OPENAI_DEPLOYMENT_GPT_IMAGE_2_5_SUNBURST=<your-sunburst-deployment>
+```
+
+Then switch per call with `--model gpt-image-2.5-sunburst`.
 
 ### 4. Default parameters via `.env` (key feature)
 
@@ -124,10 +140,12 @@ You can set your **preferred default values** for every generation parameter in 
 
 | Parameter | Environment variable | Built-in default | Allowed values |
 |-----------|----------------------|------------------|----------------|
+| model | `GPT_IMAGE_MODEL` | `gpt-image-2` | `gpt-image-2` / `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` |
 | size | `GPT_IMAGE_SIZE` | `1024x1024` | `WxH` (see size constraints) |
-| quality | `GPT_IMAGE_QUALITY` | `high` | `low` / `medium` / `high` |
+| quality | `GPT_IMAGE_QUALITY` | `high` | `low` / `medium` / `high` (2.5 models also `xhigh` / `max` / `auto`) |
 | output format | `GPT_IMAGE_FORMAT` | `png` | `png` / `jpeg` (WEBP not supported) |
-| background | `GPT_IMAGE_BACKGROUND` | `auto` | `auto` / `transparent` (transparent requires `png`) |
+| background | `GPT_IMAGE_BACKGROUND` | `auto` | `auto` / `transparent` (2.5 models also `opaque`; transparent requires `png`) |
+| complexity | `GPT_IMAGE_COMPLEXITY` | (none) | `low` / `medium` / `high` (2.5 models only; currently unavailable on Azure) |
 | compression | `GPT_IMAGE_COMPRESSION` | `100` | `0`–`100` (JPEG only) |
 | count | `GPT_IMAGE_N` | `1` | `1`–`10` |
 | output dir | `GPT_IMAGE_OUTPUT_DIR` | `./images` | any directory path (created if missing) |
@@ -185,15 +203,19 @@ python scripts/generate_image.py --prompt "cat character concepts" --n 4 --outpu
 |----------|--------------|--------|---------|-------|
 | `--prompt` | (none) | any text | **required** | Generation instruction |
 | `--size` | `GPT_IMAGE_SIZE` | `WxH` | `1024x1024` | Recommended: `1024x1024`, `1536x1024`, `1024x1536` |
-| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high` | `high` | `low` for low latency |
-| `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | WEBP not supported on Azure |
-| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent` | `auto` | `transparent` requires `--format png` |
+| `--model` | `GPT_IMAGE_MODEL` | `gpt-image-2`/`gpt-image-2.5-flare`/`gpt-image-2.5-sunburst` | `gpt-image-2` | Must match the deployment it resolves to |
+| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high` (+ `xhigh`/`max`/`auto` on 2.5) | `high` | `low` for low latency. 2.5's `high` uses fewer tokens than gpt-image-2's `high` |
+| `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | WEBP is not available on Azure yet |
+| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent` (+ `opaque` on 2.5) | `auto` | `transparent` requires `--format png` |
 | `--compression` | `GPT_IMAGE_COMPRESSION` | `0`–`100` | `100` | JPEG only |
+| `--complexity` | `GPT_IMAGE_COMPLEXITY` | `low`/`medium`/`high` | (none) | 2.5 models only. **Currently unavailable on Azure** (rejected as an unknown parameter) |
 | `--n` | `GPT_IMAGE_N` | `1`–`10` | `1` | Number of images |
 | `--user` | `GPT_IMAGE_USER` | any string | (optional) | Usage-tracking ID |
 | `--output` | `GPT_IMAGE_OUTPUT_DIR` | directory path | `./images` | Created if missing |
 
-### Size constraints (gpt-image-2)
+### Size constraints (all models)
+
+On the 2.5 models, sizes above 2560x1440 total pixels are experimental; the script prints a warning and continues.
 
 `--size` must satisfy **all** of the following, or the script errors out before calling the API:
 
@@ -241,11 +263,13 @@ On success, the absolute path of each saved file is printed to stdout, using the
 |----------|--------------|--------|---------|-------|
 | `--prompt` | (none) | any text | **required** | Editing instruction |
 | `--image` | (none) | image path (repeatable) | **required (≥1)** | Input image(s); multiple = merge. First is the base. `png`/`jpg`/`jpeg`/`webp`, up to 16 |
-| `--mask` | (none) | transparent PNG path | (optional) | Edit region (transparent area only). Must be PNG |
+| `--mask` | (none) | transparent PNG path | (optional) | Edit region (transparent area only). Must be PNG. Cannot be combined with `--markup` |
+| `--markup` | (none) | transparent PNG path | (optional) | 2.5 models only. **Currently unavailable on Azure** (rejected as an unknown parameter). Use `--mask` instead |
+| `--model` / `--complexity` | `GPT_IMAGE_MODEL` / `GPT_IMAGE_COMPLEXITY` | as for generation | as for generation | |
 | `--size` | `GPT_IMAGE_EDIT_SIZE` | `WxH` or `auto` | `auto` | `auto` matches the input image; `WxH` uses the same constraints as generation |
-| `--quality` | `GPT_IMAGE_QUALITY` | `low`/`medium`/`high` | `high` | |
+| `--quality` | `GPT_IMAGE_QUALITY` | as for generation (depends on model) | `high` | |
 | `--format` | `GPT_IMAGE_FORMAT` | `png`/`jpeg` | `png` | |
-| `--background` | `GPT_IMAGE_BACKGROUND` | `auto`/`transparent` | `auto` | `transparent` requires `--format png` |
+| `--background` | `GPT_IMAGE_BACKGROUND` | as for generation (depends on model) | `auto` | `transparent` requires `--format png` |
 | `--compression` | `GPT_IMAGE_COMPRESSION` | `0`–`100` | `100` | JPEG only |
 | `--n` | `GPT_IMAGE_N` | `1`–`10` | `1` | Number of images |
 | `--user` | `GPT_IMAGE_USER` | any string | (optional) | Usage-tracking ID |

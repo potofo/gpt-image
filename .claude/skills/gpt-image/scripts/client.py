@@ -1,6 +1,7 @@
 """Azure 画像生成 API クライアント。
 
-デプロイ名ベースのエンドポイントへ POST し、レスポンスの b64_json をデコードして
+deployments 形式（/openai/deployments/{deployment}/...）または v1 形式
+（/openai/v1/...、ボディに model=デプロイ名）のエンドポイントへ POST し、レスポンスの b64_json をデコードして
 画像バイト列を返す。HTTP エラーは種別分類し、429 は指数バックオフで再試行する。
 シークレット（認証ヘッダ値）はログ・例外メッセージに含めない。
 """
@@ -8,10 +9,16 @@ from __future__ import annotations
 
 import base64
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal, Mapping, Optional, Sequence
 
+from capabilities import compression_formats, get_capability
 from models import AuthHeader, AzureConfig, EditParams, GenerationParams
+
+Operation = Literal["generations", "edits"]
+# multipart のファイル部品: (フィールド名, (ファイル名, バイト列, MIME))
+FilePart = tuple[str, tuple[str, bytes, str]]
 
 # 入力画像の拡張子から multipart の MIME タイプを引く
 _MIME_BY_EXT = {
@@ -42,11 +49,88 @@ class ApiError(Exception):
         self.status = status
 
 
-def _build_url(config: AzureConfig, operation: str = "generations") -> str:
+@dataclass(frozen=True)
+class RawResponse:
+    """検証・エラー分類をしない生のレスポンス（検証ツール用）。"""
+
+    status: int
+    body: Mapping[str, object]   # JSON として読めない場合は {"raw_text": ...}
+
+
+def build_url(config: AzureConfig, operation: Operation) -> str:
+    """API 形式に応じたエンドポイント URL を返す。"""
+    if config.api_style == "v1":
+        return f"{config.endpoint}/openai/v1/images/{operation}?api-version={config.api_version}"
     return (
         f"{config.endpoint}/openai/deployments/{config.deployment}"
         f"/images/{operation}?api-version={config.api_version}"
     )
+
+
+def _send(
+    config: AzureConfig,
+    auth: AuthHeader,
+    operation: Operation,
+    *,
+    json_body: Optional[Mapping[str, object]],
+    form: Optional[Mapping[str, str]],
+    files: Optional[Sequence[FilePart]],
+    timeout: float,
+    http_post: Optional[Callable],
+):
+    """URL・ヘッダ・ボディを組み立てて 1 回 POST し、HTTP レスポンスをそのまま返す。
+
+    通信エラーとタイムアウトだけを ApiError にする。v1 形式ではボディに
+    model（デプロイ名）を加える。
+    """
+    if (json_body is None) == (form is None and files is None):
+        raise ValueError("json_body か form/files のどちらか一方だけを指定してください。")
+    import requests
+
+    if http_post is None:
+        http_post = requests.post
+
+    url = build_url(config, operation)
+    extra = {"model": config.deployment} if config.api_style == "v1" else {}
+    try:
+        if json_body is not None:
+            headers = {"Content-Type": "application/json", auth.name: auth.value}
+            return http_post(url, headers=headers, json={**json_body, **extra}, timeout=timeout)
+        # multipart のため Content-Type は付けない（requests が boundary 付きで設定）
+        headers = {auth.name: auth.value}
+        return http_post(url, headers=headers, files=list(files or []),
+                         data={**(form or {}), **extra}, timeout=timeout)
+    except requests.exceptions.Timeout:
+        raise ApiError(f"API 呼び出しがタイムアウトしました（{timeout} 秒）。", kind="timeout")
+    except requests.exceptions.RequestException as exc:
+        # 接続エラー等。例外メッセージにシークレットは含まれない（URL/本文のみ）。
+        raise ApiError(f"API への接続に失敗しました: {exc}", kind="unknown")
+
+
+def post_raw(
+    config: AzureConfig,
+    auth: AuthHeader,
+    operation: Operation,
+    *,
+    json_body: Optional[Mapping[str, object]] = None,
+    form: Optional[Mapping[str, str]] = None,
+    files: Optional[Sequence[FilePart]] = None,
+    timeout: float,
+    http_post: Optional[Callable] = None,
+) -> RawResponse:
+    """検証を通さずに 1 回送信し、ステータスにかかわらず RawResponse を返す。
+
+    generations は json_body、edits は form/files を指定する。
+    """
+    response = _send(config, auth, operation, json_body=json_body, form=form, files=files,
+                     timeout=timeout, http_post=http_post)
+    try:
+        body = response.json()
+        if not isinstance(body, Mapping):
+            body = {"raw_text": getattr(response, "text", "")}
+    except Exception:
+        body = {"raw_text": getattr(response, "text", "")}
+    return RawResponse(status=response.status_code, body=body)
 
 
 def _build_body(params: GenerationParams) -> dict:
@@ -58,9 +142,11 @@ def _build_body(params: GenerationParams) -> dict:
         "output_format": params.output_format,
         "background": params.background,
     }
-    # compression は JPEG 出力時のみ意味を持つ
-    if params.output_format == "jpeg":
+    # compression は圧縮に対応する出力形式（jpeg、有効なら webp）のときのみ意味を持つ
+    if params.output_format in compression_formats(get_capability(params.model)):
         body["output_compression"] = params.output_compression
+    if params.complexity:
+        body["complexity"] = params.complexity
     if params.user:
         body["user"] = params.user
     return body
@@ -88,7 +174,8 @@ def _raise_for_status(response) -> None:
         if _looks_like_moderation(response):
             raise ApiError(_MODERATION_MESSAGE, kind="moderation", status=status)
         raise ApiError(
-            "リクエストが不正です。パラメータ（特に api-version 依存の background/compression）を確認してください。",
+            "リクエストが不正です。パラメータ（特に api-version 依存の background/compression）を確認してください。"
+            "モデル種別（--model / GPT_IMAGE_MODEL）と呼び出し先のデプロイが一致しているかも確認してください。",
             kind="bad_request",
             status=status,
         )
@@ -101,7 +188,6 @@ def _raise_for_status(response) -> None:
 
 def _request_with_retry(
     do_post: Callable[[], object],
-    timeout: float,
     max_retries: int,
     sleep: Callable[[float], None],
 ) -> list[bytes]:
@@ -109,21 +195,11 @@ def _request_with_retry(
 
     429（レート制限）は上限 max_retries 回まで指数バックオフで再試行する。
     その他の HTTP エラー・タイムアウトは分類済みの ApiError を送出する。
-    do_post はヘッダ・ボディ等を内包した引数なしの POST 呼び出し。
+    do_post は _send を包んだ引数なしの POST 呼び出し（通信エラーは ApiError 化済み）。
     """
-    import requests
-
     attempt = 0
     while True:
-        try:
-            response = do_post()
-        except requests.exceptions.Timeout:
-            raise ApiError(
-                f"API 呼び出しがタイムアウトしました（{timeout} 秒）。", kind="timeout"
-            )
-        except requests.exceptions.RequestException as exc:
-            # 接続エラー等。例外メッセージにシークレットは含まれない（URL/本文のみ）。
-            raise ApiError(f"API への接続に失敗しました: {exc}", kind="unknown")
+        response = do_post()
 
         if response.status_code == 200:
             return _decode_images(response)
@@ -146,7 +222,7 @@ def generate(
     config: AzureConfig,
     auth: AuthHeader,
     params: GenerationParams,
-    timeout: float = 120.0,
+    timeout: Optional[float] = None,
     max_retries: int = 3,
     http_post: Optional[Callable] = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -155,19 +231,15 @@ def generate(
 
     429（レート制限）は上限 max_retries 回まで指数バックオフで再試行する。
     その他の HTTP エラー・タイムアウトは分類済みの ApiError を送出する。
+    timeout 未指定時はモデル種別ごとの既定値（capabilities）を使う。
     """
-    if http_post is None:
-        import requests
-
-        http_post = requests.post
-
-    url = _build_url(config, "generations")
-    headers = {"Content-Type": "application/json", auth.name: auth.value}
+    if timeout is None:
+        timeout = get_capability(params.model).timeout_generate
     body = _build_body(params)
-
     return _request_with_retry(
-        lambda: http_post(url, headers=headers, json=body, timeout=timeout),
-        timeout, max_retries, sleep,
+        lambda: _send(config, auth, "generations", json_body=body, form=None, files=None,
+                      timeout=timeout, http_post=http_post),
+        max_retries, sleep,
     )
 
 
@@ -183,8 +255,10 @@ def _build_edit_data(params: EditParams) -> dict:
     # size=auto は API 既定（入力画像に合わせる）に委ねるため送らない
     if params.size and params.size != "auto":
         data["size"] = params.size
-    if params.output_format == "jpeg":
+    if params.output_format in compression_formats(get_capability(params.model)):
         data["output_compression"] = str(params.output_compression)
+    if params.complexity:
+        data["complexity"] = params.complexity
     if params.user:
         data["user"] = params.user
     return data
@@ -201,7 +275,7 @@ def edit(
     config: AzureConfig,
     auth: AuthHeader,
     params: EditParams,
-    timeout: float = 180.0,
+    timeout: Optional[float] = None,
     max_retries: int = 3,
     http_post: Optional[Callable] = None,
     sleep: Callable[[float], None] = time.sleep,
@@ -211,28 +285,27 @@ def edit(
 
     images に複数画像を渡すと参照素材として合成（マージ）できる。先頭画像が
     ベース、mask があれば mask の透過領域のみが編集対象（インペインティング）。
+    markup があれば先頭画像への注釈として送る（2.5 系）。
     multipart/form-data で送信する（Content-Type は requests が境界付きで設定）。
     """
-    if http_post is None:
-        import requests
-
-        http_post = requests.post
+    if timeout is None:
+        timeout = get_capability(params.model).timeout_edit
     if read_bytes is None:
         read_bytes = lambda path: Path(path).read_bytes()
-
-    url = _build_url(config, "edits")
-    # multipart のため Content-Type は付けない（requests が boundary 付きで設定）
-    headers = {auth.name: auth.value}
 
     # 複数画像は image[] を繰り返す（単一でも image[] で統一）
     files = [("image[]", _open_image_part(path, read_bytes)) for path in params.images]
     if params.mask is not None:
         files.append(("mask", _open_image_part(params.mask, read_bytes)))
+    # markup は先頭画像に重ねる注釈の透過 PNG（mask とは検証で排他にしている）
+    if params.markup is not None:
+        files.append(("markup", _open_image_part(params.markup, read_bytes)))
     data = _build_edit_data(params)
 
     return _request_with_retry(
-        lambda: http_post(url, headers=headers, files=files, data=data, timeout=timeout),
-        timeout, max_retries, sleep,
+        lambda: _send(config, auth, "edits", json_body=None, form=data, files=files,
+                      timeout=timeout, http_post=http_post),
+        max_retries, sleep,
     )
 
 

@@ -48,10 +48,10 @@ Copy the skill into your personal Claude Code skills directory (`~/.claude/skill
 ```bash
 # From the root of this repository
 mkdir -p ~/.claude/skills
-cp -r .claude/skills/gpt-image-2 ~/.claude/skills/
+cp -r .claude/skills/gpt-image ~/.claude/skills/
 
 # Install Python dependencies
-pip install -r ~/.claude/skills/gpt-image-2/requirements.txt
+pip install -r ~/.claude/skills/gpt-image/requirements.txt
 ```
 
 **Windows (PowerShell)**
@@ -59,25 +59,25 @@ pip install -r ~/.claude/skills/gpt-image-2/requirements.txt
 ```powershell
 # From the root of this repository
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
-Copy-Item -Recurse -Force ".claude\skills\gpt-image-2" "$env:USERPROFILE\.claude\skills\"
+Copy-Item -Recurse -Force ".claude\skills\gpt-image" "$env:USERPROFILE\.claude\skills\"
 
 # Install Python dependencies
-pip install -r "$env:USERPROFILE\.claude\skills\gpt-image-2\requirements.txt"
+pip install -r "$env:USERPROFILE\.claude\skills\gpt-image\requirements.txt"
 ```
 
 After copying, the skill lives at:
 
-- macOS / Linux: `~/.claude/skills/gpt-image-2/`
-- Windows: `C:\Users\<you>\.claude\skills\gpt-image-2\`
+- macOS / Linux: `~/.claude/skills/gpt-image/`
+- Windows: `C:\Users\<you>\.claude\skills\gpt-image\`
 
-Start (or restart) Claude Code and confirm the `gpt-image-2` skill is listed. A request like *"画像を生成して"* / *"generate an image of ..."* will load it automatically.
+Start (or restart) Claude Code and confirm the `gpt-image` skill is listed. A request like *"画像を生成して"* / *"generate an image of ..."* will load it automatically.
 
 ### Per-project installation
 
-Keep the skill under the project's `.claude/skills/gpt-image-2/` (as in this repository). It is then available only within that project. Install the dependencies the same way:
+Keep the skill under the project's `.claude/skills/gpt-image/` (as in this repository). It is then available only within that project. Install the dependencies the same way:
 
 ```bash
-pip install -r .claude/skills/gpt-image-2/requirements.txt
+pip install -r .claude/skills/gpt-image/requirements.txt
 ```
 
 ---
@@ -265,7 +265,7 @@ Secrets are read from environment variables / `.env` only, are never hard-coded 
 ## Development
 
 ```bash
-cd .claude/skills/gpt-image-2
+cd .claude/skills/gpt-image
 python -m pytest -q
 ```
 

@@ -1,5 +1,5 @@
 ---
-name: gpt-image-2
+name: gpt-image
 description: >-
   Azure (Microsoft Foundry) の gpt-image-2 モデルでテキストから画像を生成・編集し、ローカルに保存します。
   「画像を生成して」「画像を作って」「gpt-image で画像生成」「Azure で画像生成」「イラスト/ロゴ/背景画像を作成」

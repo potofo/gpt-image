@@ -91,7 +91,7 @@ graph LR
 
 ### Directory Structure
 ```
-.claude/skills/gpt-image-2/
+.claude/skills/gpt-image/
 ├── SKILL.md                      # 起動条件 description + 前提・パラメータ要約・コマンド例（生成＋編集）
 ├── scripts/
 │   ├── generate_image.py         # 生成 CLI エントリポイント（argparse + 統括 + 終了コード）

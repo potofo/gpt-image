@@ -5,18 +5,18 @@
 本リポジトリは2つのレイヤーで構成される。
 
 1. **開発プロセス基盤** — Kiro 流の Spec-Driven Development を駆動する仕組み（`.kiro/`、`.claude/commands/`）。
-2. **プロダクト成果物** — Claude Code の Agent Skill 本体（`.claude/skills/gpt-image-2/`、実装済み・生成＋編集）。
+2. **プロダクト成果物** — Claude Code の Agent Skill 本体（`.claude/skills/gpt-image/`、実装済み・生成＋編集）。
 
 スキルは「自己完結したディレクトリ」として配置し、起動条件・手順（`SKILL.md`）と実行ロジック（`scripts/`）を分離する。
 
 ## ディレクトリパターン
 
 ### Agent Skill 本体（実装予定）
-**場所**: `.claude/skills/gpt-image-2/`
+**場所**: `.claude/skills/gpt-image/`
 **目的**: スキルの起動条件・使い方とその実行ロジックを自己完結させる。
 **構成例**:
 ```
-.claude/skills/gpt-image-2/
+.claude/skills/gpt-image/
 ├── SKILL.md              # frontmatter（name/description にトリガー語）+ 前提・パラメータ要約・コマンド例
 ├── scripts/
 │   ├── generate_image.py # 画像生成 CLI（images/generations）

@@ -3,7 +3,7 @@
 ## 1. 基盤: スキル骨格・共通型・設定読み込み
 
 - [x] 1.1 スキルディレクトリと共通型の整備
-  - `.claude/skills/gpt-image-2/scripts/` に Python パッケージを作成し、依存（`requests`、`azure-identity`）を宣言する
+  - `.claude/skills/gpt-image/scripts/` に Python パッケージを作成し、依存（`requests`、`azure-identity`）を宣言する
   - 生成パラメータ・Azure 設定・認証ヘッダの共通データ型（quality/output_format/background の列挙含む）を定義し、デフォルト値を型に埋め込む
   - 観測可能な完了条件: 各モジュールから共通型を import でき、デフォルト値付きのパラメータ型がインスタンス化できる
   - _Requirements: 2.1_

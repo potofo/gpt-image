@@ -48,10 +48,10 @@ Azure AI Foundry（Microsoft Foundry）の `gpt-image-2` モデルを使い、�
 ```bash
 # このリポジトリのルートで実行
 mkdir -p ~/.claude/skills
-cp -r .claude/skills/gpt-image-2 ~/.claude/skills/
+cp -r .claude/skills/gpt-image ~/.claude/skills/
 
 # Python 依存ライブラリのインストール
-pip install -r ~/.claude/skills/gpt-image-2/requirements.txt
+pip install -r ~/.claude/skills/gpt-image/requirements.txt
 ```
 
 **Windows (PowerShell)**
@@ -59,25 +59,25 @@ pip install -r ~/.claude/skills/gpt-image-2/requirements.txt
 ```powershell
 # このリポジトリのルートで実行
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.claude\skills" | Out-Null
-Copy-Item -Recurse -Force ".claude\skills\gpt-image-2" "$env:USERPROFILE\.claude\skills\"
+Copy-Item -Recurse -Force ".claude\skills\gpt-image" "$env:USERPROFILE\.claude\skills\"
 
 # Python 依存ライブラリのインストール
-pip install -r "$env:USERPROFILE\.claude\skills\gpt-image-2\requirements.txt"
+pip install -r "$env:USERPROFILE\.claude\skills\gpt-image\requirements.txt"
 ```
 
 コピー後、スキルは次の場所に配置されます。
 
-- macOS / Linux: `~/.claude/skills/gpt-image-2/`
-- Windows: `C:\Users\<ユーザー名>\.claude\skills\gpt-image-2\`
+- macOS / Linux: `~/.claude/skills/gpt-image/`
+- Windows: `C:\Users\<ユーザー名>\.claude\skills\gpt-image\`
 
-Claude Code を起動（再起動）し、`gpt-image-2` スキルが一覧に表示されることを確認してください。「画像を生成して」「〜の画像を作って」などの依頼で自動的に読み込まれます。
+Claude Code を起動（再起動）し、`gpt-image` スキルが一覧に表示されることを確認してください。「画像を生成して」「〜の画像を作って」などの依頼で自動的に読み込まれます。
 
 ### プロジェクト単位のインストール
 
-このリポジトリのように、プロジェクトの `.claude/skills/gpt-image-2/` に置いたままにします。その場合は当該プロジェクト内でのみ利用可能です。依存ライブラリは同様にインストールします。
+このリポジトリのように、プロジェクトの `.claude/skills/gpt-image/` に置いたままにします。その場合は当該プロジェクト内でのみ利用可能です。依存ライブラリは同様にインストールします。
 
 ```bash
-pip install -r .claude/skills/gpt-image-2/requirements.txt
+pip install -r .claude/skills/gpt-image/requirements.txt
 ```
 
 ---
@@ -265,7 +265,7 @@ python scripts/edit_image.py \
 ## 開発
 
 ```bash
-cd .claude/skills/gpt-image-2
+cd .claude/skills/gpt-image
 python -m pytest -q
 ```
 

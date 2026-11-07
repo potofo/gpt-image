@@ -149,7 +149,7 @@ python scripts/generate_image.py \
 ## 6. ファイル構成
 
 ```
-.claude/skills/gpt-image-2/
+.claude/skills/gpt-image/
 ├── SKILL.md              # 起動条件・使い方・コマンド例
 ├── scripts/
 │   └── generate_image.py # 画像生成本体（CLI 引数 + 検証 + 保存）

@@ -2,7 +2,7 @@
 
 Claude Code から Azure AI Foundry（Microsoft Foundry）の `gpt-image-2` モデルを呼び出して画像を生成・編集する **Agent Skill** を提供するプロジェクト。ユーザーが Claude Code 上で「画像を生成して」「この画像を編集して／合成して」と依頼すると、スキルが自動的に読み込まれ、結果画像をローカルにファイルとして保存する。
 
-> 実装済み（`.claude/skills/gpt-image-2/`）。初版は生成のみだったが、その後 **画像編集（images/edits）** と **`.env`／環境変数による既定値解決** を追加した。最新要件は `.kiro/specs/gpt-image-2-skill/` を参照。
+> 実装済み（`.claude/skills/gpt-image/`）。初版は生成のみだったが、その後 **画像編集（images/edits）** と **`.env`／環境変数による既定値解決** を追加した。最新要件は `.kiro/specs/gpt-image-2-skill/` を参照。
 
 ## コア能力
 
